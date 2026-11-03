@@ -73,7 +73,7 @@ function shuffleCards(array) {
 
 //
 const shuffledPokemon = shuffleCards(pokemonList);
-
+// DE AQUI PARA ABAJO SE PUEDE MODIFICAR
 /**
  * Obtiene los datos de un Pokémon desde la PokéAPI
  * @param {string|number} pokemonId - Nombre o ID del Pokémon
