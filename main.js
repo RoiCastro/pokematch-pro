@@ -1,5 +1,6 @@
 // 1. Constantes y Variables de Estado
-const TOTAL_PAIRS = 6;
+const TOTAL_PAIRS = 151;
+const POKEAPI_BASE_URL = "https://pokeapi.co/api/v2/pokemon";
 
 let moves = 0;
 let matchedPairs = 0;
@@ -73,110 +74,122 @@ function shuffleCards(array) {
 
 //
 const shuffledPokemon = shuffleCards(pokemonList);
+
 // DE AQUI PARA ABAJO SE PUEDE MODIFICAR
+
 /**
- * Obtiene los datos de un Pokémon desde la PokéAPI
- * @param {string|number} pokemonId - Nombre o ID del Pokémon
- * @returns {Object|null} Objeto con el nombre y la URL del sprite o null si hay error
+ * Hace una petición a la PokéAPI y devuelve el JSON.
+ * Centraliza el control de errores para no repetirlo en cada función.
+ * @param {string} url - URL a consultar
+ * @returns {Promise<Object>} Datos en formato JSON
  */
-async function fetchPokemonData(pokemonId) {
-    try {
-        const response = await fetch(
-            `https://pokeapi.co/api/v2/pokemon/${pokemonId}`,
-        );
-
-        if (!response.ok) {
-            throw new Error(`Error HTTP: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        return {
-            name: data.name,
-            image: data.sprites.front_shiny,
-        };
-    } catch (error) {
-        console.error("No se pudo recuperar el Pokémon:", error);
-        return null;
+async function fetchJson(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Error HTTP ${response.status} en ${url}`);
     }
+    return response.json();
 }
-
-async function fetchAllPokemonData(pokemonArray) {
-    const promises = pokemonArray.map((pokemon) => fetchPokemonData(pokemon));
-    const results = await Promise.all(promises);
-    return results.filter((result) => result !== null);
-}
-
-async function testApiConnection() {
-  console.log("[PokéMatch Pro] Consultando la PokéAPI...");
-  const pokemon = await fetchAllPokemonData(pokemonList);
-  if (pokemon) {
-    console.log("Pokémon obtenido con éxito:", pokemon);
-  }
-}
-
-
+ 
 /**
- * Obtiene un listado de Pokémon desde la PokéAPI
- * @param {number} limit - Cantidad de Pokémon a recuperar
- * @param {number} offset - Desde qué posición empezar
- * @returns {Array|null} Array de { name, url } o null si hay error
+ * Recibe una URL de la PokéAPI y devuelve el id del Pokémon.
+ * Ej: "https://pokeapi.co/api/v2/pokemon/25/" -> 25
+ * @param {string} url - URL del Pokémon
+ * @returns {number|null} Id del Pokémon o null si la URL no es válida
  */
-async function pokeapiData(limit = 20, offset = 0) {
+function getPokemonIdFromUrl(url) {
+    const match = url.match(/\/pokemon\/(\d+)\/?$/);
+    return match ? Number(match[1]) : null;
+}
+ 
+/**
+ * Busca los X primeros Pokémon de la PokéAPI y devuelve sus URLs.
+ * @param {number} cantidad - Número de Pokémon a recuperar
+ * @returns {Promise<string[]>} Array de URLs (vacío si hay error)
+ */
+async function getFirstPokemonUrls(cantidad) {
     try {
-        const response = await fetch(
-            `https://pokeapi.co/api/v2/pokemon?limit=${limit}&offset=${offset}`,
-        );
-
-        if (!response.ok) {
-            throw new Error(`Error HTTP: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        return data.results.map((pokemon) => ({
-            name: pokemon.name,
-            url: pokemon.url,
-        }));
+        const data = await fetchJson(`${POKEAPI_BASE_URL}?limit=${cantidad}&offset=0`);
+        return data.results.map((pokemon) => pokemon.url);
     } catch (error) {
         console.error("No se pudo recuperar el listado de Pokémon:", error);
+        return [];
+    }
+}
+ 
+/**
+ * Recibe un id y devuelve el Pokémon con su imagen.
+ * @param {number} id - Id del Pokémon
+ * @returns {Promise<{id: number, name: string, image: string}|null>}
+ */
+async function pokemonData(id) {
+    try {
+        const data = await fetchJson(`${POKEAPI_BASE_URL}/${id}`);
+        return {
+            id: data.id,
+            name: data.name,
+            // Usamos el sprite normal; si no existe, el shiny como respaldo
+            image: data.sprites.front_shiny ?? data.sprites.front_default,
+        };
+    } catch (error) {
+        console.error(`No se pudo recuperar el Pokémon ${id}:`, error);
         return null;
     }
 }
-
-// Prueba de carga pokeApi
-async function testPokeApiConnection() {
-    console.log("[PokéMatch Pro] Consultando el listado de la PokéAPI...");
-    const pokemonList = await pokeapiData(6);
-    if (!pokemonList || pokemonList.length === 0) {
+ 
+/**
+ * Combina las tres funciones: URLs -> ids -> datos de cada Pokémon.
+ * @param {number} cantidad - Número de Pokémon
+ * @returns {Promise<Array>} Array de Pokémon válidos
+ */
+async function getFirstPokemon(cantidad) {
+    const urls = await getFirstPokemonUrls(cantidad);
+    const ids = urls.map(getPokemonIdFromUrl).filter((id) => id !== null);
+    const pokemons = await Promise.all(ids.map(pokemonData));
+    return pokemons.filter((pokemon) => pokemon !== null);
+}
+ 
+/**
+ * Crea la tarjeta HTML de un Pokémon (nombre + imagen).
+ * @param {{name: string, image: string}} pokemon
+ * @returns {HTMLElement}
+ */
+function createPokemonCard(pokemon) {
+    const card = document.createElement("article");
+ 
+    const img = document.createElement("img");
+    img.src = pokemon.image;
+    img.alt = `Imagen de ${pokemon.name}`;
+ 
+    const nombre = document.createElement("p");
+    nombre.textContent = pokemon.name;
+ 
+    card.append(img, nombre);
+    return card;
+}
+ 
+// ---------------------- TEST ----------------------//
+/**
+ * Test: muestra el nombre y la imagen de los X primeros Pokémon
+ * por consola y en el #game-board.
+ */
+async function testPokemon(cantidad = TOTAL_PAIRS) {
+    console.log(`[PokéMatch Pro] Cargando los ${cantidad} primeros Pokémon...`);
+ 
+    const pokemons = await getFirstPokemon(cantidad);
+    if (pokemons.length === 0) {
         console.error("No se pudo obtener ningún Pokémon.");
         return;
     }
-
-    console.log("Listado obtenido con éxito:", pokemonList);
+ 
+    console.table(pokemons.map(({ name, image }) => ({ nombre: name, imagen: image })));
+ 
     const gameBoard = document.getElementById("game-board");
     if (!gameBoard) return;
-
-    gameBoard.innerHTML = `<h2>PokéMatch Pro</h2>`;
-    
-    for (const pokemon of pokemonList) {
-        const nombre = document.createElement("p");
-        nombre.textContent = `Nombre: ${pokemon.name}`;
-
-        const url = document.createElement("p");
-        url.textContent = `URL: ${pokemon.url}`;
-
-        const pokemonData = await fetchPokemonData(pokemon.name);
-        gameBoard.append(nombre, url);
-
-        if (pokemonData?.image) {
-            const img = document.createElement("img");
-            img.src = pokemonData.image;
-            img.alt = `Imagen de ${pokemon.name}`;
-            gameBoard.append(img);
-        }
-    }
+ 
+    gameBoard.innerHTML = "";
+    gameBoard.append(...pokemons.map(createPokemonCard));
 }
-
-
-testPokeApiConnection();
+ 
+testPokemon();
+ 
